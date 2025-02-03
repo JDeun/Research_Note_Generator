@@ -24,7 +24,7 @@ TEMPERATURE = TEMPERATURES["image"]
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-class ImageProcessor:
+class ImageAnalyzer:
     def __init__(self, selected_model: str):
         """이미지 처리기 초기화
         
@@ -267,7 +267,7 @@ def main():
             break
         print("올바른 모델명을 입력해주세요.")
     
-    analyzer = ImageProcessor(selected_model)
+    analyzer = ImageAnalyzer(selected_model)
     
     if not analyzer.llm:
         print(f"\n{selected_model.upper()} 모델 초기화에 실패했습니다.")
