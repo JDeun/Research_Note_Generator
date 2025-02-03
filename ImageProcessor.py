@@ -8,28 +8,14 @@ import io
 import logging
 import ssl
 from typing import Dict, Any, List, Optional
-from langchain_openai import ChatOpenAI
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_anthropic import ChatAnthropic
-from langchain_groq import ChatGroq
 from langchain.schema import HumanMessage, SystemMessage
 from langchain_community.callbacks import get_openai_callback
 import dotenv
-from config import IMAGE_PROCESSOR_MODELS, TEMPERATURES
+from config import IMAGE_PROCESSOR_MODELS, TEMPERATURES, LLM_API_KEY
+from ProcessorPrompt import IMAGE_PROCESSOR_PROMPT
 
 # .env 파일 로드
 dotenv.load_dotenv()
-
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-
-# Model Names
-CHATGPT = IMAGE_PROCESSOR_MODELS["chatgpt"]
-GEMINI = IMAGE_PROCESSOR_MODELS["gemini"]
-CLAUDE = IMAGE_PROCESSOR_MODELS["claude"]
-GROQ = IMAGE_PROCESSOR_MODELS["groq"]
 
 # LLM Settings
 TEMPERATURE = TEMPERATURES["image"]
@@ -46,9 +32,9 @@ class ImageProcessor:
         """
         self.selected_model = selected_model.lower()
         self.llm = None  # 선택된 모델의 LLM 인스턴스
-        self.system_prompt = "당신은 전문적인 이미지 분석가입니다. 사용자가 제시하는 이미지와 메타데이터를 바탕으로 객관적이고 통찰력 있는 분석을 제공하는 것이 당신의 역할입니다."
+        self.system_prompt = IMAGE_PROCESSOR_PROMPT["system"]
         self._setup_geolocator()
-        self._setup_llms()
+        self._setup_llm()
         
     def _setup_geolocator(self):
         """지오코더 설정"""
@@ -57,26 +43,27 @@ class ImageProcessor:
         ctx.verify_mode = ssl.CERT_NONE
         self.geolocator = Nominatim(user_agent="image_processor", ssl_context=ctx)
         
-    def _setup_llms(self):
-        """LLM 모델 설정"""
-        model_configs = {
-            'openai': (ChatOpenAI, {'api_key': OPENAI_API_KEY, 'model': CHATGPT}),
-            'gemini': (ChatGoogleGenerativeAI, {'api_key': GOOGLE_API_KEY, 'model': GEMINI}),
-            'claude': (ChatAnthropic, {'api_key': ANTHROPIC_API_KEY, 'model': CLAUDE}),
-            'groq': (ChatGroq, {'api_key': GROQ_API_KEY, 'model': GROQ})
-        }
-        
-        # 선택된 모델만 초기화
-        if self.selected_model in model_configs:
-            model_class, config = model_configs[self.selected_model]
-            try:
-                self.llm = model_class(temperature=TEMPERATURE, **config)
-                logger.info(f"{self.selected_model} 모델 초기화 성공")
-            except Exception as e:
-                logger.error(f"{self.selected_model} 모델 초기화 실패: {str(e)}")
-                self.llm = None
-        else:
+    def _setup_llm(self):
+        """LLM 모델 설정 (config.py 기반, API 키 예외 처리 추가)"""
+
+        if self.selected_model not in IMAGE_PROCESSOR_MODELS:
             logger.error(f"지원하지 않는 모델: {self.selected_model}")
+            self.llm = None
+            return
+
+        api_model, model_class = IMAGE_PROCESSOR_MODELS[self.selected_model]
+        api_key = LLM_API_KEY.get(self.selected_model)
+
+        if not api_key:
+            logger.error(f"API 키 누락: {self.selected_model} API 키를 .env에 설정하세요.")
+            self.llm = None
+            return
+
+        try:
+            self.llm = model_class(api_key=api_key, model=api_model, temperature=TEMPERATURE)
+            logger.info(f"{self.selected_model} 모델 초기화 성공")
+        except Exception as e:
+            logger.error(f"{self.selected_model} 모델 초기화 실패: {str(e)}")
             self.llm = None
 
     def _process_single_image(self, image_path: str) -> Dict[str, Any]:
@@ -218,17 +205,16 @@ class ImageProcessor:
     def _generate_captions(self, base64_image: str, metadata: Dict[str, Any]) -> Dict[str, str]:
         """선택된 LLM 모델을 사용하여 이미지 캡션 생성"""
         if not self.llm:
-            return {self.selected_model: "모델 초기화 실패"}
-            
+            return {self.selected_model: "❌ 모델 초기화 실패"}
+
         prompt = self._create_prompt(metadata)
-        
-        # Groq는 시스템 메시지를 지원하지 않으므로 별도 처리
+
+        # Groq 모델의 경우 시스템 메시지를 따로 설정하지 않음
         if self.selected_model == 'groq':
             messages = [
                 HumanMessage(content=[
                     {"type": "text", "text": self.system_prompt + "\n\n" + prompt},
-                    {"type": "image_url", 
-                     "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
                 ])
             ]
         else:
@@ -236,49 +222,43 @@ class ImageProcessor:
                 SystemMessage(content=self.system_prompt),
                 HumanMessage(content=[
                     {"type": "text", "text": prompt},
-                    {"type": "image_url", 
-                     "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
                 ])
             ]
-        
+
         result = {}
         try:
+            # OpenAI, Gemini 모델은 토큰 사용량을 확인함
             if self.selected_model in ['openai', 'gemini']:
                 with get_openai_callback() as cb:
                     response = self.llm.invoke(messages)
                     logger.info(f"{self.selected_model} 토큰 사용량: {cb.total_tokens}")
             else:
                 response = self.llm.invoke(messages)
-                
+
             result[self.selected_model] = response.content
-            
         except Exception as e:
             error_msg = f"Error code: {getattr(e, 'status_code', 'Unknown')} - {str(e)}"
             logger.error(f"{self.selected_model} 캡션 생성 실패: {error_msg}")
-            result[self.selected_model] = f"캡션 생성 실패: {error_msg}"
-                
+            result[self.selected_model] = "⚠️ 이미지 분석이 불가능합니다. 다시 시도해주세요."
+
         return result
+
 
     def _create_prompt(self, metadata: Dict[str, Any]) -> str:
         """캡션 생성을 위한 프롬프트 생성"""
         date_time = metadata.get('DateTimeOriginal', 'N/A')
         location = metadata.get('GPSInfo', {}).get('address', 'N/A')
-        
-        return f"""이 이미지를 한국어로 하여, 시각장애인에게 설명하는 것처럼 설명해주세요. 간결하고 명확하게 다음 요소를 중심으로 묘사해주세요."
 
-주요 내용과 구도: 이미지에서 가장 중요한 요소와 그 배치
-분위기와 특징: 색감, 조명, 감정적 분위기 등
-시간 및 장소: 촬영된 시각과 배경의 특징
-구조 및 외형: 이미지 속 사물이나 인물의 형태, 배치, 색상 등
-행동과 상황: 등장하는 인물/대상의 감정, 동작, 행동, 맥락
+        system_prompt = IMAGE_PROCESSOR_PROMPT.get("system", "이미지 분석을 수행하세요.")
+        user_prompt = IMAGE_PROCESSOR_PROMPT.get("user", "이미지에 대해 설명해주세요.")
 
-참고 정보:
-- 촬영 시간: {date_time}
-- 위치: {location}"""
+        return f"{system_prompt}\n\n{user_prompt.format(date_time=date_time, location=location)}"
+
 
 def main():
     """메인 실행 함수"""
-    valid_models = ['openai', 'gemini', 'claude', 'groq']
+    valid_models = IMAGE_PROCESSOR_MODELS.keys()
     
     # 모델 선택
     while True:
@@ -287,9 +267,9 @@ def main():
             break
         print("올바른 모델명을 입력해주세요.")
     
-    processor = ImageProcessor(selected_model)
+    analyzer = ImageProcessor(selected_model)
     
-    if not processor.llm:
+    if not analyzer.llm:
         print(f"\n{selected_model.upper()} 모델 초기화에 실패했습니다.")
         return
     
@@ -300,7 +280,7 @@ def main():
             break
             
         try:
-            result = processor._process_single_image(image_path)
+            result = analyzer._process_single_image(image_path)
             caption = result['captions'].get(selected_model)
             metadata = result['metadata']
             

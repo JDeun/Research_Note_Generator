@@ -9,30 +9,12 @@ from pathlib import Path
 import ast
 import sys
 import importlib.metadata
-import dotenv
 
-from langchain_openai import ChatOpenAI
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_anthropic import ChatAnthropic
-from langchain_groq import ChatGroq
 from langchain.schema import HumanMessage, SystemMessage
 from langchain_community.callbacks import get_openai_callback
 
-from config import CODE_PROCESSOR_MODELS, TEMPERATURES
-
-# .env 파일 로드
-dotenv.load_dotenv()
-
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-
-# Model Names
-CHATGPT = CODE_PROCESSOR_MODELS["chatgpt"]
-GEMINI = CODE_PROCESSOR_MODELS["gemini"]
-CLAUDE = CODE_PROCESSOR_MODELS["claude"]
-GROQ = CODE_PROCESSOR_MODELS["groq"]
+from config import CODE_PROCESSOR_MODELS, TEMPERATURES, CODE_PROCESSOR_LANGUAGE, LLM_API_KEY
+from ProcessorPrompt import CODE_PROCESSOR_PROMPT
 
 # LLM Settings
 TEMPERATURE = TEMPERATURES["code"]
@@ -46,34 +28,34 @@ class CodeAnalyzer:
         """코드 분석기 초기화
         
         Args:
-            selected_model (str): 사용할 모델명 ('openai', 'gemini', 'claude')
+            selected_model (str): 사용할 모델명 ('openai', 'gemini', 'claude', 'groq')
         """
         self.selected_model = selected_model.lower()
         self.llm = None
-        self.system_prompt = """당신은 상세한 코드 분석과 문서화를 수행하는 전문 분석가입니다.
-주어진 코드를 체계적으로 분석하여 코드의 목적, 로직, 데이터 흐름을 명확하게 설명해야 합니다.
-설명은 기술적으로 정확하면서도 이해하기 쉽게 한국어로 작성해주세요."""
+        self.system_prompt = CODE_PROCESSOR_PROMPT["system"]
         self._setup_llm()
 
     def _setup_llm(self):
-        """LLM 모델 설정"""
-        model_configs = {
-            'openai': (ChatOpenAI, {'api_key': OPENAI_API_KEY, 'model': CHATGPT}),
-            'gemini': (ChatGoogleGenerativeAI, {'api_key': GOOGLE_API_KEY, 'model': GEMINI}),
-            'claude': (ChatAnthropic, {'api_key': ANTHROPIC_API_KEY, 'model': CLAUDE}),
-            'groq': (ChatGroq, {'api_key': GROQ_API_KEY, 'model': GROQ})
-        }
-        
-        if self.selected_model in model_configs:
-            model_class, config = model_configs[self.selected_model]
-            try:
-                self.llm = model_class(temperature=TEMPERATURE, **config)
-                logger.info(f"{self.selected_model} 모델 초기화 성공")
-            except Exception as e:
-                logger.error(f"{self.selected_model} 모델 초기화 실패: {str(e)}")
-                self.llm = None
-        else:
+        """LLM 모델 설정 (config.py 기반, API 키 예외 처리 추가)"""
+
+        if self.selected_model not in CODE_PROCESSOR_MODELS:
             logger.error(f"지원하지 않는 모델: {self.selected_model}")
+            self.llm = None
+            return
+
+        api_model, model_class = CODE_PROCESSOR_MODELS[self.selected_model]
+        api_key = LLM_API_KEY.get(self.selected_model)
+
+        if not api_key:
+            logger.error(f"API 키 누락: {self.selected_model} API 키를 .env에 설정하세요.")
+            self.llm = None
+            return
+
+        try:
+            self.llm = model_class(api_key=api_key, model=api_model, temperature=TEMPERATURE)
+            logger.info(f"{self.selected_model} 모델 초기화 성공")
+        except Exception as e:
+            logger.error(f"{self.selected_model} 모델 초기화 실패: {str(e)}")
             self.llm = None
 
     def process_code(self, file_path: str) -> Dict[str, Any]:
@@ -162,77 +144,7 @@ class CodeAnalyzer:
         Returns:
             str: 감지된 프로그래밍 언어
         """
-        extension_map = {
-            # 프로그래밍 언어
-            '.py': 'Python',
-            '.js': 'JavaScript',
-            '.jsx': 'React/JavaScript',
-            '.ts': 'TypeScript',
-            '.tsx': 'React/TypeScript',
-            '.java': 'Java',
-            '.cpp': 'C++',
-            '.c': 'C',
-            '.cs': 'C#',
-            '.rb': 'Ruby',
-            '.go': 'Go',
-            '.rs': 'Rust',
-            '.php': 'PHP',
-            '.swift': 'Swift',
-            '.kt': 'Kotlin',
-            '.r': 'R',
-            '.scala': 'Scala',
-            '.m': 'Objective-C/MATLAB',
-            '.lua': 'Lua',
-            '.pl': 'Perl',
-            '.sh': 'Shell Script',
-            '.bash': 'Bash Script',
-            '.ps1': 'PowerShell',
-            '.vb': 'Visual Basic',
-            '.f90': 'Fortran',
-            '.dart': 'Dart',
-            '.elm': 'Elm',
-            
-            # 웹 관련
-            '.html': 'HTML',
-            '.htm': 'HTML',
-            '.xhtml': 'HTML',
-            '.css': 'CSS',
-            '.scss': 'SCSS',
-            '.sass': 'Sass',
-            '.less': 'Less',
-            '.vue': 'Vue.js',
-            '.svelte': 'Svelte',
-            
-            # 마크업/마크다운
-            '.xml': 'XML',
-            '.md': 'Markdown',
-            '.rst': 'reStructuredText',
-            '.tex': 'LaTeX',
-            
-            # 데이터/설정 파일
-            '.json': 'JSON',
-            '.yaml': 'YAML',
-            '.yml': 'YAML',
-            '.toml': 'TOML',
-            '.ini': 'INI',
-            '.cfg': 'Configuration',
-            '.conf': 'Configuration',
-            
-            # 데이터베이스
-            '.sql': 'SQL',
-            '.psql': 'PostgreSQL',
-            '.plsql': 'PL/SQL',
-            
-            # 기타
-            '.proto': 'Protocol Buffers',
-            '.graphql': 'GraphQL',
-            '.cmake': 'CMake',
-            '.gradle': 'Gradle',
-            '.dockerfile': 'Dockerfile',
-            '.tf': 'Terraform',
-            '.sol': 'Solidity',
-            '.ipynb': 'Jupyter Notebook'
-        }
+        extension_map = CODE_PROCESSOR_LANGUAGE
         return extension_map.get(path.suffix.lower(), 'Unknown')
 
     def _read_code(self, file_path: str) -> str:
@@ -401,36 +313,7 @@ class CodeAnalyzer:
         if not self.llm:
             return {"error": "모델 초기화 실패"}
                 
-        prompt = f"""다음 코드를 분석하여 세 가지 관점에서 설명해주세요:
-
-    1. 코드의 주요 목적과 핵심 기능
-    - 이 코드가 무엇을 하는지
-    - 어떤 문제를 해결하는지
-    - 주요 기능과 특징
-
-    2. 데이터 처리 로직과 알고리즘
-    - 주요 데이터 처리 단계
-    - 사용된 알고리즘이나 특별한 기법
-    - 핵심 함수와 메서드의 역할
-
-    3. 데이터 흐름도 (Mermaid 형식)
-    - 입력 데이터부터 출력까지의 과정
-    - 주요 함수들 간의 데이터 흐름
-    - 중간 처리 과정과 변환 단계
-
-    코드:
-```
-{code_content}
-```
-각 섹션을 명확히 구분하여 작성해주세요. 
-데이터 흐름도는 반드시 "```mermaid"로 시작하고 "```"로 끝나야 합니다:
-flowchart LR
-    A[입력] --> B[처리1]
-    B --> C[처리2]
-    C --> D[출력]
-
-각 단계별로 실제 데이터 타입과 변환 과정을 포함해주세요.
-"""
+        prompt = CODE_PROCESSOR_PROMPT["user"].format(code_content=code_content)
         
         messages = [
             SystemMessage(content=self.system_prompt),
@@ -524,7 +407,7 @@ def _extract_code_preview(code: str, max_lines: int = 20) -> str:
 
 def main():
     """메인 실행 함수"""
-    valid_models = ['openai', 'gemini', 'claude', 'groq']
+    valid_models = CODE_PROCESSOR_MODELS.keys()
     
     # 모델 선택
     while True:
