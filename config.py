@@ -114,3 +114,22 @@ CODE_PROCESSOR_LANGUAGE = {
             '.sol': 'Solidity',
             '.ipynb': 'Jupyter Notebook'
         }
+
+FILE_EXTENSION = {
+            # 이미지 파일
+            '.jpg': 'image', '.jpeg': 'image', '.png': 'image', '.gif': 'image',
+            '.bmp': 'image', '.tiff': 'image', '.webp': 'image',
+            
+            # 코드 파일
+            '.py': 'code', '.js': 'code', '.java': 'code', '.cpp': 'code',
+            '.c': 'code', '.cs': 'code', '.php': 'code', '.go': 'code',
+            '.ts': 'code', '.jsx': 'code', '.tsx': 'code', '.html': 'code',
+            '.css': 'code', '.sql': 'code', '.r': 'code', '.ipynb': 'code',
+            
+            # 문서 파일
+            '.pdf': 'document', '.docx': 'document', '.doc': 'document',
+            '.pptx': 'document', '.ppt': 'document', '.xlsx': 'document',
+            '.xls': 'document', '.txt': 'document', '.md': 'document',
+            '.rtf': 'document', '.csv': 'document', '.json': 'document',
+            '.xml': 'document'
+        }

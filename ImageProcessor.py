@@ -3,6 +3,7 @@ from PIL import Image
 from PIL.ExifTags import TAGS, GPSTAGS
 from geopy.geocoders import Nominatim
 from geopy.exc import GeocoderTimedOut
+from pathlib import Path
 import base64
 import io
 import logging
@@ -66,21 +67,66 @@ class ImageAnalyzer:
             logger.error(f"{self.selected_model} 모델 초기화 실패: {str(e)}")
             self.llm = None
 
-    def _process_single_image(self, image_path: str) -> Dict[str, Any]:
-        """단일 이미지 처리"""
+    def _process_single_image(self, file_path: str) -> Dict[str, Any]:
+        """단일 이미지 처리
+        
+        Args:
+            file_path (str): 이미지 파일 경로
+            
+        Returns:
+            Dict[str, Any]: 처리 결과
+            {
+                'file_info': {
+                    'file_path': str,
+                    'file_name': str
+                },
+                'metadata': {
+                    'DateTimeOriginal': str,
+                    'GPSInfo': {
+                        'coordinates': {
+                            'latitude': float,
+                            'longitude': float
+                        },
+                        'address': str,
+                        'raw': dict
+                    }
+                },
+                'captions': {
+                    'model_name': str
+                }
+            }
+        """
         try:
-            metadata = self._extract_metadata(image_path)
-            base64_image = self._encode_image(image_path)
+            # 파일 정보 설정
+            file_info = {
+                'file_path': file_path,
+                'file_name': Path(file_path).name
+            }
+            
+            # 메타데이터 추출
+            metadata = self._extract_metadata(file_path)
+            
+            # 이미지 인코딩
+            base64_image = self._encode_image(file_path)
+            
+            # 캡션 생성
             captions = self._generate_captions(base64_image, metadata)
             
             return {
-                'image_path': image_path,
+                'file_info': file_info,
                 'metadata': metadata,
                 'captions': captions
             }
+            
         except Exception as e:
-            logger.error(f"이미지 처리 중 오류 발생: {str(e)}")
-            raise
+            logger.error(f"이미지 처리 오류 ({file_path}): {str(e)}")
+            return {
+                'file_info': {
+                    'file_path': file_path,
+                    'file_name': Path(file_path).name
+                },
+                'error': str(e)
+            }
 
     def _extract_metadata(self, image_path: str) -> Dict[str, Any]:
         """이미지 메타데이터 추출"""

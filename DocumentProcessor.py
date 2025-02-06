@@ -5,6 +5,8 @@ from typing import List, Dict, Any
 from pathlib import Path
 from datetime import datetime
 import dotenv
+import time
+import random
 from config import DOCUMENT_PROCESSOR_MODELS, TEMPERATURES, LLM_API_KEY
 from ProcessorPrompt import DOCUMENT_PROCESSOR_PROMPT
 
@@ -55,6 +57,22 @@ class DocumentAnalyzer:
         self.selected_model = selected_model.lower()
         self.llm = None
         self._setup_llm()
+        
+    def _retry_with_backoff(self, func, args=None, kwargs=None, max_retries=3):
+        """지수 백오프를 적용한 재시도"""
+        args = args or []
+        kwargs = kwargs or {}
+        
+        for attempt in range(max_retries):
+            try:
+                return func(*args, **kwargs)
+            except Exception as e:
+                if "429" in str(e) and attempt < max_retries - 1:
+                    wait_time = (2 ** attempt) + random.uniform(0, 1)
+                    logger.warning(f"Rate limit exceeded. Waiting {wait_time:.1f}s...")
+                    time.sleep(wait_time)
+                    continue
+                raise
 
     def _setup_llm(self):
         """LLM 모델 설정 (config.py 기반, API 키 예외 처리 포함)"""
@@ -87,40 +105,240 @@ class DocumentAnalyzer:
                 results.append({"file_path": fp, "error": str(e)})
         return results
 
+    def _extract_table_data(self, pdf_path: str) -> List[Dict]:
+        """PDF에서 표 구조를 추출"""
+        try:
+            import pdfplumber  # 직접 임포트
+            tables = []
+            
+            with pdfplumber.open(pdf_path) as pdf:
+                for page in pdf.pages:
+                    # 페이지 크기 정보
+                    bbox = page.bbox  # [x0, y0, x1, y1]
+                    
+                    # 표 추출
+                    pdf_tables = page.extract_tables()
+                    
+                    for table in pdf_tables:
+                        if not table or len(table) < 2:  # 헤더+데이터 최소 2행
+                            continue
+                        
+                        # 헤더와 데이터 분리
+                        headers = [str(col).strip() for col in table[0] if col]
+                        rows = []
+                        for row in table[1:]:
+                            cleaned_row = [str(cell).strip() if cell else '' for cell in row]
+                            if any(cleaned_row):  # 빈 행 제외
+                                rows.append(cleaned_row)
+                                
+                        if headers and rows:
+                            # 표 영역 정보 (page.bbox 사용)
+                            table_area = {
+                                'bbox': [
+                                    float(bbox[0]), 
+                                    float(bbox[1]), 
+                                    float(bbox[2]), 
+                                    float(bbox[3])
+                                ],
+                                'page_number': page.page_number
+                            }
+                            
+                            # 표 제목 감지
+                            title = self._detect_table_title(page, table_area)
+                            
+                            tables.append({
+                                'title': title,
+                                'headers': headers,
+                                'rows': rows
+                            })
+                            
+            return tables
+            
+        except Exception as e:
+            logger.error(f"표 추출 실패: {str(e)}")
+            return []
+    
+    def _detect_table_title(self, page, table_area: dict) -> str:
+        """표 위치 기준으로 제목 텍스트 감지"""
+        try:
+            # 표 위쪽 영역 좌표 계산
+            try:
+                # 좌표값을 숫자로 변환
+                x0 = float(table_area['bbox'][0])
+                x1 = float(table_area['bbox'][2])
+                y0 = float(table_area['bbox'][1])
+                y1 = y0 - 50  # 50pt 위
+                
+                if y1 < 0:  # 페이지 상단을 넘어가지 않도록
+                    y1 = 0
+                    
+                search_area = {
+                    'x0': x0,
+                    'x1': x1,
+                    'y0': y1,
+                    'y1': y0
+                }
+                
+            except (ValueError, TypeError, KeyError) as e:
+                logger.debug(f"좌표 변환 실패, 기본값 사용: {str(e)}")
+                # 기본 검색 영역 사용
+                search_area = {
+                    'x0': 0,
+                    'x1': page.width,
+                    'y0': 0,
+                    'y1': page.height
+                }
+            
+            # 영역 내 텍스트 추출
+            text = page.crop(search_area).extract_text()
+            if not text:
+                return ""
+                
+            # 가능한 제목 라인
+            candidates = text.strip().split('\n')
+            
+            # 제목 후보 선택
+            for line in reversed(candidates):
+                if self._is_valid_title(line):
+                    return line.strip()
+                    
+            return ""
+            
+        except Exception as e:
+            logger.error(f"표 제목 감지 실패: {str(e)}")
+            return ""
+
     def process_single_document(self, file_path: str) -> Dict[str, Any]:
-        metadata = self._extract_metadata(file_path)
-        docs = self._load_document(file_path)
-        if not docs:
+        """문서 처리 및 분석"""
+        CHUNK_SIZE = 2000
+        CHUNK_OVERLAP = 200
+        
+        try:
+            # 메타데이터 추출
+            metadata = self._extract_metadata(file_path)
+            
+            # 문서 로딩
+            docs = self._load_document(file_path)
+            if not docs:
+                return {
+                    "file_info": metadata,
+                    "error": "문서에서 텍스트를 추출하지 못했습니다."
+                }
+
+            # 전체 텍스트 생성
+            full_text = "\n".join(d.page_content for d in docs)
+            doc_length = len(full_text)
+            
+            # 표 추출
+            tables = self._extract_table_data(file_path)
+            
+            # 텍스트 분할
+            text_splitter = RecursiveCharacterTextSplitter(
+                chunk_size=CHUNK_SIZE,
+                chunk_overlap=CHUNK_OVERLAP
+            )
+            texts = text_splitter.split_text(full_text)
+            
+            # 청크별 요약 (람다 제거)
+            summaries = []
+            for chunk in texts:
+                try:
+                    summary = self._retry_with_backoff(self._generate_chunk_summary, args=[chunk])
+                    if summary:
+                        summaries.append(summary)
+                except Exception as e:
+                    logger.error(f"청크 요약 실패: {str(e)}")
+            
+            # 요약 통합
+            if summaries:
+                final_summary = self._combine_summaries(summaries)
+            else:
+                final_summary = full_text[:CHUNK_SIZE]
+                
+            # JSON 분석 (람다 제거)
+            info_json = self._retry_with_backoff(
+                self._extract_info_json, 
+                args=[final_summary, len(texts) == 1]
+            )
+            
+            # 페이지 구조화
+            structured_text = self._structure_text(docs)
+
             return {
                 "file_info": metadata,
-                "error": "문서에서 텍스트를 추출하지 못했습니다."
+                "doc_length": doc_length,
+                "final_text_or_summary": final_summary,
+                "tables": tables,
+                "text_content": structured_text,
+                "analysis_result": info_json
             }
+            
+        except Exception as e:
+            logger.error(f"문서 처리 중 오류 발생: {str(e)}")
+            return {
+                "file_info": metadata,
+                "error": str(e)
+            }
+            
+    def _generate_chunk_summary(self, text: str) -> str:
+        """텍스트 청크 요약 생성
+        
+        Args:
+            text (str): 요약할 텍스트 청크
+            
+        Returns:
+            str: 생성된 요약 또는 빈 문자열
+        """
+        try:
+            # 프롬프트 생성
+            prompt = SystemMessage(content=DOCUMENT_PROCESSOR_PROMPT["system_summary"])
+            user_prompt = HumanMessage(content=DOCUMENT_PROCESSOR_PROMPT["user_summary"].format(
+                full_text=text
+            ))
+            
+            # LLM 호출
+            response = self.llm.invoke([prompt, user_prompt])
+            
+            return response.content
+            
+        except Exception as e:
+            logger.error(f"청크 요약 생성 실패: {str(e)}")
+            return ""
 
-        # 전체 문서 텍스트 생성
-        full_text = "\n".join(d.page_content for d in docs)
-        doc_length = len(full_text)
-        is_short_doc = doc_length < SHORT_DOC_THRESHOLD
-
-        # 문서 길이에 따라 처리
-        if is_short_doc:
-            # 3000자 미만: 요약 없이 전체 문서 내용을 사용
-            final_text = full_text
-        else:
-            # 3000자 이상: map-reduce 요약 실행
-            splitted_docs = self._split_docs(docs)
-            final_text = self._map_reduce_summary(splitted_docs)
-
-        # JSON 분석 (문서 길이에 따라 다른 프롬프트 사용)
-        info_json = self._extract_info_json(final_text, is_short_doc)
-        structured_text = self._structure_text(docs)
-
-        return {
-            "file_info": metadata,
-            "doc_length": doc_length,
-            "final_text_or_summary": final_text,
-            "analysis_result": info_json,
-            "text_content": structured_text
-        }
+    def _combine_summaries(self, summaries: List[str]) -> str:
+        """청크 요약들을 하나로 통합
+        
+        Args:
+            summaries (List[str]): 청크별 요약 리스트
+            
+        Returns:
+            str: 통합된 요약
+        """
+        # 빈 요약 제거
+        valid_summaries = [s for s in summaries if s.strip()]
+        if not valid_summaries:
+            return ""
+            
+        # 단일 요약이면 그대로 반환
+        if len(valid_summaries) == 1:
+            return valid_summaries[0]
+            
+        # 여러 요약 통합
+        combined = "\n\n".join(valid_summaries)
+        
+        try:
+            # 최종 요약 생성
+            prompt = SystemMessage(content=DOCUMENT_PROCESSOR_PROMPT["system_summary"])
+            user_prompt = HumanMessage(content=DOCUMENT_PROCESSOR_PROMPT["user_summary"].format(
+                full_text=combined
+            ))
+            
+            response = self.llm.invoke([prompt, user_prompt])
+            return response.content
+            
+        except Exception as e:
+            logger.error(f"요약 통합 실패: {str(e)}")
+            return combined  # 실패시 단순 연결
 
     def _extract_metadata(self, file_path: str) -> Dict[str, Any]:
         p = Path(file_path)
