@@ -167,19 +167,57 @@ class ResearchNoteGenerator:
             "end": today
         }
     
-    def _generate_title(self, results: Dict[str, Any], time_range: Dict[str, str]) -> str:
-        """연구 노트 제목 생성"""
+    def _generate_title(self, results: Dict[str, Any], time_range: Dict[str, str], persona: Dict[str, Any]) -> str:
+        """개선된 프롬프트와 페르소나를 활용하여 연구 노트 제목 생성"""
         if not self.llm:
             # LLM이 없을 경우 기본 제목 반환
             return f"연구 노트: {time_range['start']} ~ {time_range['end']}"
+
+        # 데이터 요약 및 타입 생성
+        summary, summary_type = self._create_data_summary_and_type(results)
+
+        try:
+            # 페르소나 어조 가져오기
+            persona_tone = persona.get('tone', '중립적인')
+
+            # 제목 생성 프롬프트 변수 포맷팅 적용
+            system_content = RESEARCH_NOTE_TITLE_GENERATOR_PROMPT["system"]
+            user_content = RESEARCH_NOTE_TITLE_GENERATOR_PROMPT["user"].format(
+                summary_type=summary_type,
+                summary=summary,
+                time_range_start=time_range['start'],
+                time_range_end=time_range['end'],
+                persona_tone=persona_tone
+            )
+
+            # 제목 생성 프롬프트
+            system_message = SystemMessage(content=system_content)
+            user_message = HumanMessage(content=user_content)
+
+            response = self.llm.invoke([system_message, user_message])
+            title = response.content.strip().replace('"', '').replace("'", "")
+
+            # 제목이 너무 길면 잘라내기
+            if len(title) > 50:
+                title = title[:47] + "..."
+
+            return title
+
+        except Exception as e:
+            logger.error(f"제목 생성 실패: {str(e)}")
+            # 기본 제목 생성
+            return f"연구 노트: {time_range['start']} ~ {time_range['end']}"
         
-        # 간단한 컨텍스트 요약 생성
-        summary = ""
+    def _create_data_summary_and_type(self, results: Dict[str, Any]) -> tuple[str, str]:
+        """데이터 요약과 요약 타입을 생성하는 메서드"""
+        summary_parts = []
+        summary_type_parts = []
         
         # 일기 요약
         if results.get('diary_entries'):
             diary_count = len(results['diary_entries'])
-            summary += f"{diary_count}개의 일기, "
+            summary_parts.append(f"{diary_count}개의 일기")
+            summary_type_parts.append("일기")
         
         # 코드 파일 요약
         if results.get('code'):
@@ -187,49 +225,27 @@ class ResearchNoteGenerator:
             languages = set(code.get('language', 'Unknown') for code in results['code'])
             languages = [lang for lang in languages if lang != 'Unknown']
             if languages:
-                summary += f"{code_count}개의 코드 파일 ({', '.join(languages)}), "
+                summary_parts.append(f"{code_count}개의 코드 파일 ({', '.join(languages)})")
             else:
-                summary += f"{code_count}개의 코드 파일, "
+                summary_parts.append(f"{code_count}개의 코드 파일")
+            summary_type_parts.append("코드")
         
         # 문서 요약
         if results.get('document'):
             doc_count = len(results['document'])
-            summary += f"{doc_count}개의 문서, "
-        
+            summary_parts.append(f"{doc_count}개의 문서")
+            summary_type_parts.append("문서")
+         
         # 이미지 요약
         if results.get('image'):
             img_count = len(results['image'])
-            summary += f"{img_count}개의 이미지, "
+            summary_parts.append(f"{img_count}개의 이미지")
+            summary_type_parts.append("이미지")
         
-        # 끝 쉼표 제거
-        summary = summary.rstrip(", ")
-        
-        try:
-            # 제목 생성 프롬프트 변수 포맷팅 적용
-            system_content = RESEARCH_NOTE_TITLE_GENERATOR_PROMPT["system"]
-            user_content = RESEARCH_NOTE_TITLE_GENERATOR_PROMPT["user"].format(
-                            summary=summary,
-                            time_range_start=time_range['start'],
-                            time_range_end=time_range['end']
-                        )
-            
-            # 제목 생성 프롬프트
-            system_message = SystemMessage(content=system_content)
-            user_message = HumanMessage(content=user_content)
-            
-            response = self.llm.invoke([system_message, user_message])
-            title = response.content.strip().replace('"', '').replace("'", "")
-            
-            # 제목이 너무 길면 잘라내기
-            if len(title) > 50:
-                title = title[:47] + "..."
-            
-            return title
-            
-        except Exception as e:
-            logger.error(f"제목 생성 실패: {str(e)}")
-            # 기본 제목 생성
-            return f"연구 노트: {time_range['start']} ~ {time_range['end']}"
+        # 요약 생성 및 반환
+        summary = ", ".join(summary_parts)
+        summary_type = ", ".join(summary_type_parts)
+        return summary, summary_type
     
     def _create_prompt(self, results: Dict[str, Any], persona: Dict[str, Any], 
                   title: str, time_range: Dict[str, str], 
@@ -251,67 +267,60 @@ class ResearchNoteGenerator:
             title=title,
             now=now,
             time_range_start=time_range['start'],
-            time_range_end=time_range['end']
+            time_range_end=time_range['end'],
+            persona_name=persona['name'],
+            persona_birth_date=persona.get('birth_date', '1990-01-01'),
+            persona_tone=persona['tone'],
+            persona_voice=persona['voice'],
+            data_summary="placeholder" # 임시로 설정합니다.
         )
+        
+        # 데이터 요약 생성
+        data_summary = ""
         
         # 일기 데이터 추가
         if results.get('diary_entries'):
-            user_prompt += "## 일기 데이터\n"
+            data_summary += "### 일기 데이터\n"
             for entry in results['diary_entries']:
                 # 일기는 기본적으로 연구 자료로 간주 (직접 작성한 것이므로)
-                user_prompt += f"- 날짜: {entry.get('date', 'N/A')}\n  내용: {entry.get('content', 'N/A')}\n  카테고리: 연구 자료 (직접 작성)\n\n"
+                data_summary += f"- 날짜: {entry.get('date', 'N/A')}, 내용: {entry.get('content', 'N/A')} (카테고리: 연구 자료 (직접 작성))\n"
         
         # 코드 분석 결과 추가
         if results.get('code'):
-            user_prompt += "## 코드 분석 결과\n"
+            data_summary += "\n### 코드 분석 결과\n"
             for code in results['code']:
                 file_info = code.get('file_info', {})
                 category = code.get('category', 'Unknown')
                 category_desc = "참고 자료 (외부 자료)" if category == "reference" else "연구 자료 (직접 작성)"
-                
-                user_prompt += f"- 파일: {file_info.get('file_name', 'Unknown')} ({code.get('language', 'Unknown')})\n"
-                user_prompt += f"  목적: {code.get('purpose', 'N/A')}\n"
-                user_prompt += f"  로직: {code.get('logic', 'N/A')}\n"
-                user_prompt += f"  카테고리: {category_desc}\n\n"
+                data_summary += f"- 파일: {file_info.get('file_name', 'Unknown')} ({code.get('language', 'Unknown')}), "
+                data_summary += f"목적: {code.get('purpose', 'N/A')}, 로직: {code.get('logic', 'N/A')} (카테고리: {category_desc})\n"
         
         # 문서 분석 결과 추가
         if results.get('document'):
-            user_prompt += "## 문서 분석 결과\n"
+            data_summary += "\n### 문서 분석 결과\n"
             for doc in results['document']:
                 file_info = doc.get('file_info', {})
                 category = doc.get('category', 'Unknown')
                 category_desc = "참고 자료 (외부 자료)" if category == "reference" else "연구 자료 (직접 작성)"
-                
-                user_prompt += f"- 파일: {file_info.get('file_name', 'Unknown')}\n"
-                user_prompt += f"  제목: {doc.get('title', 'Unknown')}\n"
-                user_prompt += f"  목적: {doc.get('purpose', 'N/A')}\n"
-                user_prompt += f"  요약: {doc.get('summary', 'N/A')}\n"
-                user_prompt += f"  카테고리: {category_desc}\n\n"
+                data_summary += f"- 파일: {file_info.get('file_name', 'Unknown')}, 제목: {doc.get('title', 'Unknown')}, "
+                data_summary += f"목적: {doc.get('purpose', 'N/A')}, 요약: {doc.get('summary', 'N/A')} (카테고리: {category_desc})\n"
         
         # 이미지 분석 결과 추가
         if results.get('image'):
-            user_prompt += "## 이미지 분석 결과\n"
+            data_summary += "\n### 이미지 분석 결과\n"
             for img in results['image']:
                 file_info = img.get('file_info', {})
                 category = img.get('category', 'Unknown')
                 category_desc = "참고 자료 (외부 자료)" if category == "reference" else "연구 자료 (직접 촬영)"
-                
-                user_prompt += f"- 파일: {file_info.get('file_name', 'Unknown')}\n"
-                user_prompt += f"  촬영 시간: {img.get('formatted_date', 'N/A')}\n"
-                user_prompt += f"  위치: {img.get('location', 'N/A')}\n"
-                user_prompt += f"  설명: {img.get('caption', 'N/A')}\n"
-                user_prompt += f"  카테고리: {category_desc}\n\n"
+                data_summary += f"- 파일: {file_info.get('file_name', 'Unknown')}, 촬영 시간: {img.get('formatted_date', 'N/A')}, "
+                data_summary += f"위치: {img.get('location', 'N/A')}, 설명: {img.get('caption', 'N/A')} (카테고리: {category_desc})\n"
+        
+        # data_summary를 포함하도록 user_prompt 업데이트
+        user_prompt = user_prompt.replace("placeholder", data_summary)
         
         # 중점 카테고리 안내
         if focus_category:
-            user_prompt += f"\n중점 카테고리: {focus_category} (이 카테고리에 중점을 두고 연구 노트 작성)\n\n"
-        
-        # 연구 노트 작성 지침 추가
-        user_prompt += RESEARCH_NOTE_GENERATOR_PROMPT["guideline"].format(
-            persona_birth_date=persona.get('birth_date', '1990-01-01'),
-            persona_tone=persona['tone'],
-            persona_voice=persona['voice']
-        )
+            user_prompt += f"\n\n중점 카테고리: {focus_category} (이 카테고리에 중점을 두고 연구 노트 작성)\n\n"
         
         return {
             "system": system_prompt,
