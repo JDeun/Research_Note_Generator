@@ -17,21 +17,28 @@ LLM_API_KEY = {
 # Models for each processor
 IMAGE_PROCESSOR_MODELS = {
     "chatgpt": ("gpt-4o-mini", ChatOpenAI),
-    "gemini": ("gemini-1.5-flash-8b", ChatGoogleGenerativeAI),
+    "gemini": ("gemini-2.0-flash-lite", ChatGoogleGenerativeAI),
     "claude": ("claude-3-5-sonnet-20241022", ChatAnthropic),
     "groq": ("llama-3.2-90b-vision-preview", ChatGroq)
 }
 
 CODE_PROCESSOR_MODELS = {
     "chatgpt": ("gpt-4o-mini", ChatOpenAI),
-    "gemini": ("gemini-1.5-flash-8b", ChatGoogleGenerativeAI),
+    "gemini": ("gemini-2.0-flash-lite", ChatGoogleGenerativeAI),
     "claude": ("claude-3-haiku-20240307", ChatAnthropic),
     "groq": ("llama-3.3-70b-versatile", ChatGroq)
 }
 
 DOCUMENT_PROCESSOR_MODELS = {
     "chatgpt": ("gpt-4o-mini", ChatOpenAI),
-    "gemini": ("gemini-1.5-flash-8b", ChatGoogleGenerativeAI),
+    "gemini": ("gemini-2.0-flash-lite", ChatGoogleGenerativeAI),
+    "claude": ("claude-3-haiku-20240307", ChatAnthropic),
+    "groq": ("llama-3.2-90b-vision-preview", ChatGroq)
+}
+
+RESEARCH_NOTE_GENERATOR_MODELS = {
+    "chatgpt": ("gpt-4o-mini", ChatOpenAI),
+    "gemini": ("gemini-2.0-flash-lite", ChatGoogleGenerativeAI),
     "claude": ("claude-3-haiku-20240307", ChatAnthropic),
     "groq": ("llama-3.3-70b-versatile", ChatGroq)
 }
@@ -40,7 +47,8 @@ DOCUMENT_PROCESSOR_MODELS = {
 TEMPERATURES = {
     "image": 0.0,
     "code": 0.0,
-    "document": 0.0
+    "document": 0.0,
+    "research_note": 0.4
 }
 
 CODE_PROCESSOR_LANGUAGE = {
