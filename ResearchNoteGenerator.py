@@ -8,7 +8,7 @@ from langchain.schema import HumanMessage, SystemMessage
 from langchain_community.callbacks import get_openai_callback
 
 from config import RESEARCH_NOTE_GENERATOR_MODELS, TEMPERATURES, LLM_API_KEY
-from persona import PERSONA_LIST
+from persona_manager import PERSONA_LIST
 from ProcessorPrompt import RESEARCH_NOTE_GENERATOR_PROMPT, RESEARCH_NOTE_TITLE_GENERATOR_PROMPT
 
 # 로깅 설정

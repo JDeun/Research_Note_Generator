@@ -6,7 +6,7 @@ from datetime import datetime
 from file_handler import FileHandler
 from parallel_processor import ParallelProcessor
 from ResearchNoteGenerator import ResearchNoteGenerator
-from persona import PERSONA_LIST
+from persona_manager import PERSONA_LIST
 
 # 로깅 설정
 logging.basicConfig(
