@@ -1088,29 +1088,39 @@ class DocumentAnalyzer:
             List[str]: 청크별 요약 목록
         """
         if not chunks:
+            logger.debug("처리할 청크가 없습니다.")
             return []
         
         summaries = []
-        for chunk in chunks:
-            chunk_hash = hash(chunk)
-            
-            # 캐시에서 요약 확인
-            if chunk_hash in self.summary_cache:
-                summary = self.summary_cache[chunk_hash]
-                logger.debug("캐시에서 요약 로드됨")
-            else:
-                # 새로 요약 생성
-                try:
-                    summary = self._generate_chunk_summary_with_retry(chunk)
-                    if summary:
-                        # 요약 캐싱
-                        self.summary_cache[chunk_hash] = summary
-                except Exception as e:
-                    logger.error(f"청크 요약 생성 실패: {str(e)}")
-                    # 실패 시 청크 앞부분 사용
-                    summary = chunk[:200] + "... (요약 생성 실패)"
-            
-            summaries.append(summary)
+        for i, chunk in enumerate(chunks):
+            try:
+                logger.debug(f"청크 {i+1}/{len(chunks)} 처리 중...")
+                chunk_hash = hash(chunk)
+                
+                # 캐시에서 요약 확인
+                if chunk_hash in self.summary_cache:
+                    summary = self.summary_cache[chunk_hash]
+                    logger.debug("캐시에서 요약 로드됨")
+                else:
+                    # 새로 요약 생성
+                    try:
+                        summary = self._generate_chunk_summary_with_retry(chunk)
+                        if summary:
+                            # 요약 캐싱
+                            self.summary_cache[chunk_hash] = summary
+                    except Exception as e:
+                        import traceback
+                        logger.error(f"청크 요약 생성 실패: {str(e)}\n{traceback.format_exc()}")
+                        # 실패 시 청크 앞부분 사용
+                        summary = chunk[:200] + "... (요약 생성 실패)"
+                
+                summaries.append(summary)
+                
+            except Exception as e:
+                import traceback
+                logger.error(f"청크 {i+1} 처리 중 오류 발생: {str(e)}\n{traceback.format_exc()}")
+                # 오류 발생 시 빈 요약 추가
+                summaries.append("요약 생성 중 오류 발생")
         
         return summaries
     
@@ -1202,36 +1212,48 @@ class DocumentAnalyzer:
         """최종 요약 생성"""
         # 요약이 없으면 전체 텍스트의 앞부분 사용
         if not summaries:
+            logger.debug("요약이 없어 전체 텍스트 앞부분을 사용합니다.")
             return full_text[:min(SHORT_DOC_THRESHOLD, len(full_text))]
             
         # 단일 요약이면 그대로 반환
         if len(summaries) == 1:
+            logger.debug("단일 요약을 그대로 반환합니다.")
             return summaries[0]
             
         # 요약 결합
-        combined = "\n\n".join(summaries)
-        
-        # LLM이 없거나 결합된 요약이 짧으면 그대로 반환
-        if not self.llm or len(combined) < 1000:
-            return combined
-        
         try:
+            combined = "\n\n".join(summaries)
+            
+            # LLM이 없거나 결합된 요약이 짧으면 그대로 반환
+            if not self.llm or len(combined) < 1000:
+                logger.debug("LLM이 없거나 요약이 짧아 결합된 요약을 그대로 반환합니다.")
+                return combined
+            
             # 최종 요약 생성
+            logger.debug("LLM을 사용하여 최종 요약 생성 중...")
             prompt = SystemMessage(content=DOCUMENT_PROCESSOR_PROMPT["system_summary"])
             user_prompt = HumanMessage(content=DOCUMENT_PROCESSOR_PROMPT["user_summary"].format(
                 full_text=combined
             ))
             
             response = self.llm.invoke([prompt, user_prompt])
+            logger.debug("최종 요약 생성 완료")
             return response.content
             
         except Exception as e:
-            logger.error(f"요약 통합 실패: {str(e)}")
-            return combined  # 실패 시 요약 연결
+            import traceback
+            logger.error(f"요약 통합 실패: {str(e)}\n{traceback.format_exc()}")
+            # 결합된 요약 반환
+            if isinstance(summaries, list) and summaries:
+                return "\n\n".join(summaries)  # 실패 시 요약 연결
+            else:
+                logger.warning("summaries가 리스트가 아니거나 비어 있습니다.")
+                return str(summaries) if summaries else "요약을 생성할 수 없습니다."
     
     def _generate_info_json(self, summary: str, is_short: bool) -> Dict[str, str]:
         """문서 정보 JSON 생성"""
         if not self.llm:
+            logger.debug("LLM이 초기화되지 않아 기본 정보 추출을 사용합니다.")
             return self._fallback_info_extraction(summary)
         
         try:
@@ -1244,6 +1266,7 @@ class DocumentAnalyzer:
                 return text.strip()
             
             # 프롬프트 생성
+            logger.debug(f"{'전체 문서' if is_short else '요약된 문서'}에 대한 정보 추출 중...")
             if is_short:
                 system_prompt = SystemMessage(content=DOCUMENT_PROCESSOR_PROMPT["system_full"])
                 user_prompt = HumanMessage(content=DOCUMENT_PROCESSOR_PROMPT["user_full"].format(final_text=summary))
@@ -1254,10 +1277,32 @@ class DocumentAnalyzer:
             # LLM 호출
             resp = self.llm.invoke([system_prompt, user_prompt])
             content = cleanup_response(resp.content)
+            logger.debug("LLM 응답 받음, JSON 변환 시도 중...")
             
             try:
                 # 응답 파싱
                 data = json.loads(content)
+                
+                # 리스트인 경우 처리
+                if isinstance(data, list):
+                    if len(data) > 0:
+                        # 첫 번째 항목이 딕셔너리인 경우
+                        if isinstance(data[0], dict):
+                            logger.warning(f"LLM 응답이 리스트입니다. 첫 번째 항목을 사용합니다.")
+                            data = data[0]
+                        else:
+                            logger.warning(f"LLM 응답이 딕셔너리가 아닌 리스트입니다: {type(data[0])}")
+                            return self._fallback_info_extraction(summary)
+                    else:
+                        logger.warning("LLM 응답이 빈 리스트입니다.")
+                        return self._fallback_info_extraction(summary)
+                
+                # 딕셔너리가 아닌 경우
+                if not isinstance(data, dict):
+                    logger.warning(f"LLM 응답이 딕셔너리가 아닙니다: {type(data)}")
+                    return self._fallback_info_extraction(summary)
+                    
+                # 필수 키 확인 및 디폴트값 설정
                 result = {
                     "title": data.get("title", "제목을 찾을 수 없습니다."),
                     "author": data.get("author", "작성자를 찾을 수 없습니다."),
@@ -1265,46 +1310,63 @@ class DocumentAnalyzer:
                     "summary": data.get("summary", "요약을 제공할 수 없습니다."),
                     "caption": data.get("caption", "캡션을 생성할 수 없습니다.")
                 }
+                logger.debug("JSON 변환 성공")
                 return result
-            except json.JSONDecodeError:
-                logger.error(f"JSON 변환 실패. 응답 내용:\n{content}")
+                
+            except json.JSONDecodeError as e:
+                logger.error(f"JSON 변환 실패: {str(e)}. 응답 내용:\n{content}")
                 result = self._fallback_info_extraction(summary)
-                result["error"] = "JSON 변환 실패"
+                result["error"] = f"JSON 변환 실패: {str(e)}"
                 result["raw_response"] = content
                 return result
                 
         except Exception as e:
-            logger.error(f"문서 정보 추출 실패: {str(e)}")
+            import traceback
+            logger.error(f"문서 정보 추출 실패: {str(e)}\n{traceback.format_exc()}")
             return self._fallback_info_extraction(summary)
     
     def _fallback_info_extraction(self, text: str) -> Dict[str, str]:
         """LLM 분석 실패 시 폴백 정보 추출"""
-        # 빈 줄로 분리하여 첫 부분 추출
-        paragraphs = [p for p in text.split('\n\n') if p.strip()]
-        first_paragraph = paragraphs[0] if paragraphs else ""
-        
-        # 문서 시작 부분에서 제목 찾기
-        title_candidates = []
-        lines = text.split('\n')[:10]  # 처음 10줄만 확인
-        
-        for line in lines:
-            clean_line = line.strip()
-            # 제목 조건: 짧고, 특정 문자로 끝나지 않음
-            if clean_line and len(clean_line) < 100 and not clean_line[-1] in ['.', ',', ';', ':']:
-                title_candidates.append(clean_line)
-        
-        title = title_candidates[0] if title_candidates else "제목 정보 없음"
-        
-        # 요약은 첫 문단 사용
-        summary = first_paragraph if len(first_paragraph) < 500 else first_paragraph[:500] + "..."
-        
-        return {
-            "title": title,
-            "author": "작성자 정보 없음",
-            "purpose": "문서 목적 정보 없음",
-            "summary": summary,
-            "caption": title
-        }
+        try:
+            logger.debug("폴백 정보 추출 사용 중...")
+            # 빈 줄로 분리하여 첫 부분 추출
+            paragraphs = [p for p in text.split('\n\n') if p.strip()]
+            first_paragraph = paragraphs[0] if paragraphs else ""
+            
+            # 문서 시작 부분에서 제목 찾기
+            title_candidates = []
+            lines = text.split('\n')[:10]  # 처음 10줄만 확인
+            
+            for line in lines:
+                clean_line = line.strip()
+                # 제목 조건: 짧고, 특정 문자로 끝나지 않음
+                if clean_line and len(clean_line) < 100 and not clean_line[-1] in ['.', ',', ';', ':']:
+                    title_candidates.append(clean_line)
+            
+            title = title_candidates[0] if title_candidates else "제목 정보 없음"
+            
+            # 요약은 첫 문단 사용
+            summary = first_paragraph if len(first_paragraph) < 500 else first_paragraph[:500] + "..."
+            
+            logger.debug("폴백 정보 추출 완료")
+            return {
+                "title": title,
+                "author": "작성자 정보 없음",
+                "purpose": "문서 목적 정보 없음",
+                "summary": summary,
+                "caption": title
+            }
+        except Exception as e:
+            import traceback
+            logger.error(f"폴백 정보 추출 실패: {str(e)}\n{traceback.format_exc()}")
+            # 최소한의 정보 반환
+            return {
+                "title": "제목 추출 실패",
+                "author": "작성자 정보 없음",
+                "purpose": "문서 목적 정보 없음",
+                "summary": "요약 추출 실패",
+                "caption": "정보 추출 실패"
+            }
     
     def _extract_metadata(self, file_path: str) -> Dict[str, Any]:
         """파일 메타데이터 추출"""

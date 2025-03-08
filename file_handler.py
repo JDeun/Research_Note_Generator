@@ -105,24 +105,21 @@ class FileHandler:
             logger.error(f"파일 분류 중 오류 발생: {str(e)}")
             raise
 
+    # file_handler.py에 추가
     def _get_category(self, file_path: str) -> str:
-        """
-        파일 경로를 기반으로 카테고리 결정
-        
-        Args:
-            file_path (str): 파일 경로
-            
-        Returns:
-            str: 카테고리 ('reference' 또는 'research')
-        """
         path = Path(file_path)
         
-        # 정확한 'reference' 폴더 인식
+        # 디버깅용 로그 추가
+        logger.debug(f"파일 경로: {file_path}")
+        logger.debug(f"부모 디렉토리: {list(path.parents)}")
+        
         for parent in path.parents:
+            logger.debug(f"검사 중인 부모: {parent.name}")
             if parent.name.lower() == 'reference':
+                logger.info(f"참고 자료로 분류: {file_path}")
                 return 'reference'
         
-        # 그 외는 모두 연구자료로 분류
+        logger.info(f"연구 자료로 분류: {file_path}")
         return 'research'
 
     def validate_path(self, path: str) -> bool:

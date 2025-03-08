@@ -12,7 +12,7 @@ from persona_manager import PERSONA_LIST
 from ProcessorPrompt import RESEARCH_NOTE_GENERATOR_PROMPT, RESEARCH_NOTE_TITLE_GENERATOR_PROMPT
 
 # 로깅 설정
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 class ResearchNoteGenerator:
@@ -123,6 +123,39 @@ class ResearchNoteGenerator:
             logger.error(f"연구노트 생성 실패: {str(e)}")
             return {"error": str(e)}
     
+    def _validate_category_descriptions(self, content: str) -> str:
+        """
+        생성된 연구 노트 내용에서 카테고리와 서술 방식의 일치 여부 검증
+        
+        Args:
+            content (str): 생성된 연구 노트 내용
+            
+        Returns:
+            str: 검증 및 수정된 내용
+        """
+        lines = content.split('\n')
+        corrected_lines = []
+        
+        current_category = None
+        for i, line in enumerate(lines):
+            # 카테고리 감지
+            if "카테고리:" in line and "research" in line.lower():
+                current_category = "research"
+            elif "카테고리:" in line and "reference" in line.lower():
+                current_category = "reference"
+                
+            # 연구 자료에서 '분석했다' 표현 수정
+            if current_category == "research" and "분석했다" in line:
+                line = line.replace("분석했다", "개발했다")
+                
+            # 참고 자료에서 '개발했다' 표현 수정
+            if current_category == "reference" and "개발했다" in line:
+                line = line.replace("개발했다", "분석했다")
+                
+            corrected_lines.append(line)
+        
+        return '\n'.join(corrected_lines)
+
     def _select_persona(self, persona_name: Optional[str] = None) -> Dict[str, Any]:
         """지정된 이름 또는 랜덤으로 페르소나 선택"""
         if persona_name:
@@ -259,28 +292,60 @@ class ResearchNoteGenerator:
             user_prompt += "## 일기 데이터\n"
             for entry in results['diary_entries']:
                 # 일기는 기본적으로 연구 자료로 간주 (직접 작성한 것이므로)
-                user_prompt += f"- 날짜: {entry.get('date', 'N/A')}\n  내용: {entry.get('content', 'N/A')}\n  카테고리: 연구 자료 (직접 작성)\n\n"
+                user_prompt += f"- 날짜: {entry.get('date', 'N/A')}\n  내용: {entry.get('content', 'N/A')}\n  카테고리: 연구 자료 (research)\n\n"
         
-        # 코드 분석 결과 추가
+        # 코드 분석 결과 추가 - 카테고리 일관성 검사 및 강제 분류 추가
         if results.get('code'):
             user_prompt += "## 코드 분석 결과\n"
             for code in results['code']:
                 file_info = code.get('file_info', {})
-                category = code.get('category', 'Unknown')
-                category_desc = "참고 자료 (외부 자료)" if category == "reference" else "연구 자료 (직접 작성)"
                 
-                user_prompt += f"- 파일: {file_info.get('file_name', 'Unknown')} ({code.get('language', 'Unknown')})\n"
-                user_prompt += f"  목적: {code.get('purpose', 'N/A')}\n"
-                user_prompt += f"  로직: {code.get('logic', 'N/A')}\n"
+                # 파일 경로 기반 강제 분류
+                file_path = file_info.get('file_path', '')
+                original_category = code.get('category', 'Unknown')
+                corrected_category = self._verify_category(file_path, original_category)
+                
+                # 카테고리 변경 여부 로깅
+                if original_category != corrected_category:
+                    logger.warning(f"카테고리 불일치 감지 및 수정: {file_info.get('file_name', 'Unknown')} - "
+                                f"원래: {original_category}, 수정: {corrected_category}")
+                
+                # 강제 서술 템플릿 적용
+                file_name = file_info.get('file_name', 'Unknown')
+                language = code.get('language', 'Unknown')
+                purpose = code.get('purpose', 'N/A')
+                logic = code.get('logic', 'N/A')
+                
+                if corrected_category == "reference":
+                    category_desc = "참고 자료 (reference)"
+                    action_desc = f"나는 이 {language} 파일을 분석했다. 이 코드는 {purpose}"
+                else:
+                    category_desc = "연구 자료 (research)"
+                    action_desc = f"나는 이 {language} 파일을 개발했다. 이 코드는 {purpose}"
+                
+                user_prompt += f"- 파일: {file_name} ({language})\n"
+                user_prompt += f"  설명: {action_desc}\n"
+                user_prompt += f"  목적: {purpose}\n"
+                user_prompt += f"  로직: {logic}\n"
                 user_prompt += f"  카테고리: {category_desc}\n\n"
         
-        # 문서 분석 결과 추가
+        # 문서 분석 결과 추가 - 카테고리 일관성 검사 및 강제 분류 추가
         if results.get('document'):
             user_prompt += "## 문서 분석 결과\n"
             for doc in results['document']:
                 file_info = doc.get('file_info', {})
-                category = doc.get('category', 'Unknown')
-                category_desc = "참고 자료 (외부 자료)" if category == "reference" else "연구 자료 (직접 작성)"
+                
+                # 파일 경로 기반 강제 분류
+                file_path = file_info.get('file_path', '')
+                original_category = doc.get('category', 'Unknown')
+                corrected_category = self._verify_category(file_path, original_category)
+                
+                # 카테고리 변경 여부 로깅
+                if original_category != corrected_category:
+                    logger.warning(f"카테고리 불일치 감지 및 수정: {file_info.get('file_name', 'Unknown')} - "
+                                f"원래: {original_category}, 수정: {corrected_category}")
+                
+                category_desc = "참고 자료 (reference)" if corrected_category == "reference" else "연구 자료 (research)"
                 
                 user_prompt += f"- 파일: {file_info.get('file_name', 'Unknown')}\n"
                 user_prompt += f"  제목: {doc.get('title', 'Unknown')}\n"
@@ -288,13 +353,23 @@ class ResearchNoteGenerator:
                 user_prompt += f"  요약: {doc.get('summary', 'N/A')}\n"
                 user_prompt += f"  카테고리: {category_desc}\n\n"
         
-        # 이미지 분석 결과 추가
+        # 이미지 분석 결과 추가 - 카테고리 일관성 검사 및 강제 분류 추가
         if results.get('image'):
             user_prompt += "## 이미지 분석 결과\n"
             for img in results['image']:
                 file_info = img.get('file_info', {})
-                category = img.get('category', 'Unknown')
-                category_desc = "참고 자료 (외부 자료)" if category == "reference" else "연구 자료 (직접 촬영)"
+                
+                # 파일 경로 기반 강제 분류
+                file_path = file_info.get('file_path', '')
+                original_category = img.get('category', 'Unknown')
+                corrected_category = self._verify_category(file_path, original_category)
+                
+                # 카테고리 변경 여부 로깅
+                if original_category != corrected_category:
+                    logger.warning(f"카테고리 불일치 감지 및 수정: {file_info.get('file_name', 'Unknown')} - "
+                                f"원래: {original_category}, 수정: {corrected_category}")
+                
+                category_desc = "참고 자료 (reference)" if corrected_category == "reference" else "연구 자료 (research)"
                 
                 user_prompt += f"- 파일: {file_info.get('file_name', 'Unknown')}\n"
                 user_prompt += f"  촬영 시간: {img.get('formatted_date', 'N/A')}\n"
@@ -317,6 +392,39 @@ class ResearchNoteGenerator:
             "system": system_prompt,
             "user": user_prompt
         }
+    
+    def _verify_category(self, file_path: str, original_category: str) -> str:
+        """
+        파일 경로를 기반으로 카테고리 확인 및 수정
+        
+        Args:
+            file_path (str): 파일 경로
+            original_category (str): 원래 카테고리
+            
+        Returns:
+            str: 검증된 카테고리 ('reference' 또는 'research')
+        """
+        try:
+            # 파일 경로가 비어있으면 원래 카테고리 반환
+            if not file_path:
+                logger.warning(f"파일 경로가 비어있어 원래 카테고리 유지: {original_category}")
+                return original_category
+                
+            # Windows와 Unix 경로 구분자 처리
+            normalized_path = file_path.replace('\\', '/')
+            logger.debug(f"카테고리 검증 중: {normalized_path}")
+            
+            # 'reference' 폴더 포함 여부 확인
+            if '/reference/' in normalized_path or '\\reference\\' in file_path:
+                logger.debug(f"파일이 reference 폴더에 있습니다: {file_path}")
+                return "reference"
+            else:
+                logger.debug(f"파일이 reference 폴더에 없습니다: {file_path}")
+                return "research"
+        except Exception as e:
+            logger.error(f"카테고리 검증 중 오류 발생: {str(e)}")
+            # 오류 발생 시 원래 카테고리 사용
+            return original_category
     
     def save_research_note(self, note: Dict[str, Any], output_path: str) -> str:
         """

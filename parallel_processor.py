@@ -47,55 +47,9 @@ class ParallelProcessor:
         
         Args:
             classified_files (Dict[str, List[Dict[str, str]]]): 분류된 파일 정보
-            
+                
         Returns:
             Dict[str, Any]: 표준화된 처리 결과
-            {
-                'image': [
-                    {
-                        'file_info': {...},
-                        'metadata': {...},
-                        'captions': {...},
-                        'category': str,
-                        'processed_at': str,
-                        'formatted_date': str,  # 표준화된 날짜 (YYYY-MM-DD)
-                        'location': str         # 메타데이터에서 추출한 위치
-                    },
-                    ...
-                ],
-                'code': [
-                    {
-                        'file_info': {...},
-                        'code_info': {...},
-                        'category': str,
-                        'processed_at': str,
-                        'language': str,        # 표준화된 언어 정보
-                        'purpose': str,         # 분석에서 추출한 목적
-                        'logic': str            # 분석에서 추출한 로직
-                    },
-                    ...
-                ],
-                'document': [
-                    {
-                        'file_info': {...},
-                        'analysis_result': {...},
-                        'category': str,
-                        'processed_at': str,
-                        'title': str,           # 분석에서 추출한 제목
-                        'summary': str,         # 분석에서 추출한 요약
-                        'purpose': str          # 분석에서 추출한 목적
-                    },
-                    ...
-                ],
-                'diary_entries': [
-                    {
-                        'date': str,            # 표준화된 날짜 (YYYY-MM-DD)
-                        'content': str,         # 일기 내용
-                        'original_date': str    # 원본 날짜 (YYMMDD)
-                    },
-                    ...
-                ]
-            }
         """
         raw_results = {
             'image': [],
@@ -110,6 +64,7 @@ class ParallelProcessor:
                 logger.info(f"이미지 파일 처리 시작: {len(classified_files['image'])}개")
                 futures = []
                 for file_info in classified_files['image']:
+                    logger.debug(f"이미지 파일 처리 대기 중: {file_info['path']} (카테고리: {file_info['category']})")
                     future = executor.submit(self._process_image, file_info)
                     futures.append(future)
                 
@@ -117,6 +72,10 @@ class ParallelProcessor:
                     try:
                         result = future.result()
                         if result:
+                            # 카테고리 정보 로깅
+                            file_path = result.get('file_info', {}).get('file_path', 'unknown')
+                            category = result.get('category', 'unknown')
+                            logger.debug(f"이미지 파일 처리 완료: {file_path} (카테고리: {category})")
                             raw_results['image'].append(result)
                     except Exception as e:
                         logger.error(f"이미지 처리 실패: {str(e)}")
@@ -126,6 +85,7 @@ class ParallelProcessor:
                 logger.info(f"코드 파일 처리 시작: {len(classified_files['code'])}개")
                 futures = []
                 for file_info in classified_files['code']:
+                    logger.debug(f"코드 파일 처리 대기 중: {file_info['path']} (카테고리: {file_info['category']})")
                     future = executor.submit(self._process_code, file_info)
                     futures.append(future)
                 
@@ -133,6 +93,10 @@ class ParallelProcessor:
                     try:
                         result = future.result()
                         if result:
+                            # 카테고리 정보 로깅
+                            file_path = result.get('file_info', {}).get('file_path', 'unknown')
+                            category = result.get('category', 'unknown')
+                            logger.debug(f"코드 파일 처리 완료: {file_path} (카테고리: {category})")
                             raw_results['code'].append(result)
                     except Exception as e:
                         logger.error(f"코드 처리 실패: {str(e)}")
@@ -142,6 +106,7 @@ class ParallelProcessor:
                 logger.info(f"문서 파일 처리 시작: {len(classified_files['document'])}개")
                 futures = []
                 for file_info in classified_files['document']:
+                    logger.debug(f"문서 파일 처리 대기 중: {file_info['path']} (카테고리: {file_info['category']})")
                     future = executor.submit(self._process_document, file_info)
                     futures.append(future)
                 
@@ -149,6 +114,10 @@ class ParallelProcessor:
                     try:
                         result = future.result()
                         if result:
+                            # 카테고리 정보 로깅
+                            file_path = result.get('file_info', {}).get('file_path', 'unknown')
+                            category = result.get('category', 'unknown')
+                            logger.debug(f"문서 파일 처리 완료: {file_path} (카테고리: {category})")
                             raw_results['document'].append(result)
                     except Exception as e:
                         logger.error(f"문서 처리 실패: {str(e)}")
@@ -158,6 +127,7 @@ class ParallelProcessor:
                 logger.info(f"일기 파일 처리 시작: {len(classified_files['diary'])}개")
                 futures = []
                 for file_info in classified_files['diary']:
+                    logger.debug(f"일기 파일 처리 대기 중: {file_info['path']} (카테고리: {file_info['category']})")
                     future = executor.submit(self._process_diary, file_info)
                     futures.append(future)
                 
@@ -167,14 +137,35 @@ class ParallelProcessor:
                         if diary_result and "error" not in diary_result:
                             # 날짜-내용 매핑을 raw_results['diary'] 딕셔너리에 병합
                             raw_results['diary'].update(diary_result)
+                            logger.debug(f"일기 파일 처리 완료: {list(diary_result.keys())}")
                     except Exception as e:
                         logger.error(f"일기 처리 실패: {str(e)}")
         
         # 결과 표준화
         standardized_results = self._standardize_results(raw_results)
         
-        logger.info(f"모든 파일 처리 완료")
-        logger.info(f"처리 결과 요약: 이미지({len(standardized_results['image'])}), 코드({len(standardized_results['code'])}), 문서({len(standardized_results['document'])}), 일기({len(standardized_results['diary_entries'])})")
+        # 최종 결과 카테고리 확인 로깅
+        logger.info("파일 처리 및 결과 표준화 완료")
+        logger.info(f"이미지: {len(standardized_results['image'])}개")
+        for img in standardized_results['image']:
+            file_name = img.get('file_info', {}).get('file_name', 'unknown')
+            category = img.get('category', 'unknown')
+            logger.debug(f"표준화된 이미지: {file_name} (카테고리: {category})")
+        
+        logger.info(f"코드: {len(standardized_results['code'])}개")
+        for code in standardized_results['code']:
+            file_name = code.get('file_info', {}).get('file_name', 'unknown')
+            category = code.get('category', 'unknown')
+            logger.debug(f"표준화된 코드: {file_name} (카테고리: {category})")
+        
+        logger.info(f"문서: {len(standardized_results['document'])}개")
+        for doc in standardized_results['document']:
+            file_name = doc.get('file_info', {}).get('file_name', 'unknown')
+            category = doc.get('category', 'unknown')
+            logger.debug(f"표준화된 문서: {file_name} (카테고리: {category})")
+        
+        logger.info(f"일기: {len(standardized_results['diary_entries'])}개")
+        
         return standardized_results
 
     def _process_image(self, file_info: Dict[str, str]) -> Dict[str, Any]:
