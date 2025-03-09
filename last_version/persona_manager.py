@@ -26,53 +26,53 @@
 창의적인: 독창적인 아이디어를 제시하고 새로운 관점을 제시하는 어조
 """
 
-PERSONA_LIST = [
-    {"name": "나준채",
-     "gender" : "male",
-    "birth_date": "1980-01-29",
-    "tone" : "격식 있는",
-    "voice" : "분석적인"
-    },
-    {"name": "양성일",
-     "gender" : "male",
-    "birth_date": "1990-01-01",
-    "tone" : "진지한",
-    "voice" : "설명적인"
-    },
-    {"name": "유영진",
-     "gender" : "female",
-    "birth_date": "1992-02-15",
-    "tone" : "긍정적인",
-    "voice" : "사색적인"
-    },
-    {"name": "이주혜",
-     "gender" : "female",
-    "birth_date": "1993-05-30",
-    "tone" : "친근한",
-    "voice" : "설명적인"
-    },
-    {"name": "한승준",
-     "gender" : "male",
-    "birth_date": "1997-04-15",
-    "tone" : "설득적인",
-    "voice" : "분석적인"
-    },
-    {"name": "정찬",
-     "gender" : "male",
-    "birth_date": "1995-05-03",
-    "tone" : "딱딱한",
-    "voice" : "분석적인"
-    },
-    {"name": "조용은",
-     "gender" : "male",
-    "birth_date": "1991-10-12",
-    "tone" : "격식 있는",
-    "voice" : "설명적인"
-    },
-    {"name": "이민희",
-     "gender" : "female",
-    "birth_date": "1997-02-28",
-    "tone" : "긍정적인",
-    "voice" : "질문하는"
-    },
-]
+"""
+페르소나 정보를 JSON 파일로부터 로드하는 모듈
+"""
+import json
+import os
+import logging
+from typing import List, Dict, Any
+
+# 로깅 설정
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# JSON 파일 경로 (환경 변수 또는 기본값)
+JSON_PATH = os.environ.get("PERSONA_JSON_PATH", "personas.json")
+
+def load_personas_from_json(file_path=JSON_PATH) -> List[Dict[str, Any]]:
+    """
+    JSON 파일에서 페르소나 목록 로드
+    
+    Args:
+        file_path (str): 로드할 JSON 파일 경로
+    
+    Returns:
+        list: 페르소나 목록
+    """
+    try:
+        if not os.path.exists(file_path):
+            logger.error(f"JSON 파일이 존재하지 않습니다: {file_path}")
+            return []
+            
+        with open(file_path, 'r', encoding='utf-8') as f:
+            loaded_list = json.load(f)
+        logger.info(f"{len(loaded_list)}개의 페르소나를 {file_path}에서 로드했습니다.")
+        return loaded_list
+    except Exception as e:
+        logger.error(f"JSON 로드 실패: {str(e)}")
+        return []
+
+# 모듈 로드 시 바로 JSON에서 페르소나 로드
+PERSONA_LIST = load_personas_from_json()
+
+# 테스트 코드
+if __name__ == "__main__":
+    # 현재 로드된 페르소나 목록 출력
+    if PERSONA_LIST:
+        print(f"총 {len(PERSONA_LIST)}개의 페르소나 로드됨:")
+        for persona in PERSONA_LIST:
+            print(f"- {persona['name']} ({persona['gender']}, {persona['birth_date']})")
+    else:
+        print(f"페르소나를 로드하지 못했습니다. JSON 파일({JSON_PATH})이 있는지 확인하세요.")

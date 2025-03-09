@@ -1,0 +1,58 @@
+[
+    {
+      "name": "나준채",
+      "gender": "male",
+      "birth_date": "1980-01-29",
+      "tone": "격식 있는",
+      "voice": "분석적인"
+    },
+    {
+      "name": "양성일",
+      "gender": "male",
+      "birth_date": "1990-01-01",
+      "tone": "진지한",
+      "voice": "설명적인"
+    },
+    {
+      "name": "유영진",
+      "gender": "female",
+      "birth_date": "1992-02-15",
+      "tone": "긍정적인",
+      "voice": "사색적인"
+    },
+    {
+      "name": "이주혜",
+      "gender": "female",
+      "birth_date": "1993-05-30",
+      "tone": "친근한",
+      "voice": "설명적인"
+    },
+    {
+      "name": "한승준",
+      "gender": "male",
+      "birth_date": "1997-04-15",
+      "tone": "설득적인",
+      "voice": "분석적인"
+    },
+    {
+      "name": "정찬",
+      "gender": "male",
+      "birth_date": "1995-05-03",
+      "tone": "딱딱한",
+      "voice": "분석적인"
+    },
+    {
+      "name": "조용은",
+      "gender": "male",
+      "birth_date": "1991-10-12",
+      "tone": "격식 있는",
+      "voice": "설명적인"
+    },
+    {
+      "name": "이민희",
+      "gender": "female",
+      "birth_date": "1997-02-28",
+      "tone": "긍정적인",
+      "voice": "질문하는"
+    }
+  ]
