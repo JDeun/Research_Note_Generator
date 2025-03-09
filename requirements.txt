@@ -1,0 +1,51 @@
+# requirements.txt - 리팩토링된 연구 노트 생성 시스템
+
+# 기본 패키지
+python-dotenv>=1.0.0     # 환경 변수 관리
+pathlib>=1.0.1           # 경로 처리
+typing-extensions>=4.6.0  # 타입 힌팅 확장
+
+# 병렬 처리
+concurrent-futures>=3.0.5; python_version < '3.2'  # Python 3.2+ 내장
+
+# LLM 모델 API
+langchain>=0.0.267       # LLM 추상화 프레임워크
+langchain-openai>=0.0.1  # OpenAI 모델 지원
+langchain-anthropic>=0.0.2 # Anthropic 모델 지원
+langchain-google-genai>=0.0.3 # Google Gemini 모델 지원
+langchain-groq>=0.0.1    # Groq 모델 지원
+
+# 파일 처리
+Pillow>=9.5.0           # 이미지 처리
+python-magic>=0.4.27    # 파일 유형 감지
+geopy>=2.3.0            # 지리 정보 처리
+pdfplumber>=0.9.0       # PDF 텍스트 추출
+PyMuPDF>=1.22.5         # PDF 이미지 추출
+pypdfium2>=4.16.0       # PDF 파싱
+PyPDF2>=3.0.0           # PDF 처리 대체 옵션
+python-docx>=0.8.11     # DOCX 파일 처리
+openpyxl>=3.1.2         # Excel 파일 처리
+python-pptx>=0.6.21     # PowerPoint 파일 처리
+beautifulsoup4>=4.12.2  # HTML/XML 파싱
+docling>=0.4.2          # 문서 변환
+
+# 유틸리티
+numpy>=1.24.0           # 수치 연산
+pandas>=2.0.0           # 데이터 처리
+matplotlib>=3.7.1       # 데이터 시각화
+seaborn>=0.12.2         # 고급 데이터 시각화
+joblib>=1.2.0           # 병렬 처리 유틸리티
+pyyaml>=6.0             # YAML 파일 처리
+tqdm>=4.65.0            # 진행률 표시
+
+# 옵션 패키지 (주석 처리)
+# torch>=2.0.0           # PyTorch (필요시 주석 해제)
+# tensorflow>=2.12.0     # TensorFlow (필요시 주석 해제)
+# transformers>=4.30.0   # Hugging Face Transformers (필요시 주석 해제)
+
+# 개발 도구 (주석 처리)
+# pytest>=7.3.1          # 테스트 프레임워크 (개발용)
+# black>=23.3.0          # 코드 포매터 (개발용)
+# isort>=5.12.0          # 임포트 정렬 (개발용)
+# flake8>=6.0.0          # 린터 (개발용)
+# mypy>=1.3.0            # 타입 검사 (개발용)
